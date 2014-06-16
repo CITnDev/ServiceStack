@@ -1,7 +1,7 @@
 using System;
 using ServiceStack.Logging;
 
-namespace ServiceStack
+namespace ServiceStack.Common.Utils
 {
     public static class FuncUtils
     {
@@ -45,7 +45,7 @@ namespace ServiceStack
             return default(T);
         }
 
-#if !SL5 //No Stopwatch
+#if !SILVERLIGHT //No Stopwatch
         public static void WaitWhile(Func<bool> condition, int millisecondTimeout, int millsecondPollPeriod = 10)
         {
             var timer = System.Diagnostics.Stopwatch.StartNew();

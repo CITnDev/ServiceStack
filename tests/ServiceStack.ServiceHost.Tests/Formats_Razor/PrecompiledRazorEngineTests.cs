@@ -1,6 +1,11 @@
-﻿using System.Linq;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
 using System.Web;
 using NUnit.Framework;
+using ServiceStack.Common.Utils;
+using ServiceStack.Razor;
 using ServiceStack.VirtualPath;
 
 namespace ServiceStack.ServiceHost.Tests.Formats_Razor
@@ -26,7 +31,7 @@ namespace ServiceStack.ServiceHost.Tests.Formats_Razor
         [Test]
         public void Pages_begin_compilation_on_startup()
         {
-            foreach (var page in new[] { "v1", "v2", "v3" }.Select(name => RazorFormat.GetPageByName(name)))
+            foreach (var page in new[] {"v1", "v2", "v3"}.Select(name => RazorFormat.GetPageByName(name)))
             {
                 Assert.That(page.MarkedForCompilation || page.IsCompiling || page.IsValid);
             }
@@ -39,7 +44,7 @@ namespace ServiceStack.ServiceHost.Tests.Formats_Razor
             RazorFormat.AddFileAndPage("/simple.cshtml", template);
 
             var page = RazorFormat.GetPageByPathInfo("/simple.cshtml");
-            FuncUtils.WaitWhile(() => page.MarkedForCompilation || page.IsCompiling, millisecondTimeout: 5000);
+            FuncUtils.WaitWhile(() => page.MarkedForCompilation || page.IsCompiling, millisecondTimeout: 5000 );
             Assert.That(page.IsValid);
         }
 

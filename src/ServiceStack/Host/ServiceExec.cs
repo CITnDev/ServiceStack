@@ -1,29 +1,41 @@
-//Copyright (c) Service Stack LLC. All Rights Reserved.
-//License: https://raw.github.com/ServiceStack/ServiceStack/master/license.txt
-
 using System;
 using System.Collections.Generic;
 using System.Linq.Expressions;
 using System.Reflection;
-using ServiceStack.Web;
+using ServiceStack.Common.Web;
+using ServiceStack.Text;
+using ServiceStack.WebHost.Endpoints;
 
-namespace ServiceStack.Host
+namespace ServiceStack.ServiceHost
 {
-    public interface IServiceExec
+    public interface INServiceExec
     {
-        object Execute(IRequest requestContext, object instance, object request);
+        object Execute(IRequestContext requestContext, object instance, object request);
     }
 
-    public class ServiceRequestExec<TService, TRequest> : IServiceExec
+    public class NServiceRequestExec<TService, TRequest> : INServiceExec
     {
-        public object Execute(IRequest requestContext, object instance, object request)
+        static NServiceRequestExec()
         {
-            return ServiceExec<TService>.Execute(requestContext, instance, request,
-                typeof(TRequest).GetOperationName());
+            try
+            {
+                NServiceExec<TService>.CreateServiceRunnersFor<TRequest>();
+            }
+            catch (Exception ex)
+            {
+                ex.Message.Print();
+                throw;
+            }
+        }
+
+        public object Execute(IRequestContext requestContext, object instance, object request)
+        {
+            return NServiceExec<TService>.Execute(requestContext, instance, request,
+                typeof(TRequest).Name);
         }
     }
 
-    public static class ServiceExecExtensions
+    public static class NServiceExecExtensions
     {
         public static IEnumerable<MethodInfo> GetActions(this Type serviceType)
         {
@@ -41,26 +53,24 @@ namespace ServiceStack.Host
         }
     }
 
-    internal class ServiceExec<TService>
+    public class NServiceExec<TService>
     {
-        private static Dictionary<Type, List<ActionContext>> actionMap;
+        private static Dictionary<Type, List<ActionContext>> actionMap
+            = new Dictionary<Type, List<ActionContext>>();
 
-        private static Dictionary<string, InstanceExecFn> execMap;
+        private static Dictionary<string, InstanceExecFn> execMap 
+            = new Dictionary<string, InstanceExecFn>();
 
-        public static void Reset()
+        static NServiceExec()
         {
-            actionMap = new Dictionary<Type, List<ActionContext>>();
-            execMap = new Dictionary<string, InstanceExecFn>();
-
             foreach (var mi in typeof(TService).GetActions())
             {
                 var actionName = mi.Name.ToUpper();
                 var args = mi.GetParameters();
 
                 var requestType = args[0].ParameterType;
-                var actionCtx = new ActionContext
-                {
-                    Id = ActionContext.Key(actionName, requestType.GetOperationName()),
+                var actionCtx = new ActionContext {
+                    Id = ActionContext.Key(actionName, requestType.Name),
                     ServiceType = typeof(TService),
                     RequestType = requestType,
                 };
@@ -73,13 +83,13 @@ namespace ServiceStack.Host
                 {
                     //Potential problems with MONO, using reflection for fallback
                     actionCtx.ServiceAction = (service, request) =>
-                                              mi.Invoke(service, new[] { request });
+                        mi.Invoke(service, new[] { request });
                 }
 
                 var reqFilters = new List<IHasRequestFilter>();
                 var resFilters = new List<IHasResponseFilter>();
 
-                foreach (var attr in mi.GetCustomAttributes(true))
+                foreach (var attr in mi.GetCustomAttributes(false))
                 {
                     var hasReqFilter = attr as IHasRequestFilter;
                     var hasResFilter = attr as IHasResponseFilter;
@@ -104,7 +114,7 @@ namespace ServiceStack.Host
             }
         }
 
-        private static ActionInvokerFn CreateExecFn(Type requestType, MethodInfo mi)
+        public static ActionInvokerFn CreateExecFn(Type requestType, MethodInfo mi)
         {
             var serviceType = typeof(TService);
 
@@ -129,15 +139,15 @@ namespace ServiceStack.Host
                 var executeFunc = Expression.Lambda<VoidActionInvokerFn>
                 (callExecute, serviceParam, requestDtoParam).Compile();
 
-                return (service, request) =>
-                {
+                return (service, request) => {
+                  
                     executeFunc(service, request);
                     return null;
                 };
             }
         }
 
-        private static IEnumerable<ActionContext> GetActionsFor<TRequest>()
+        public static List<ActionContext> GetActionsFor<TRequest>()
         {
             List<ActionContext> requestActions;
             return actionMap.TryGetValue(typeof(TRequest), out requestActions)
@@ -151,27 +161,29 @@ namespace ServiceStack.Host
             {
                 if (execMap.ContainsKey(actionCtx.Id)) continue;
 
-                var serviceRunner = HostContext.CreateServiceRunner<TRequest>(actionCtx);
+                var serviceRunner = EndpointHost.CreateServiceRunner<TRequest>(actionCtx);
                 execMap[actionCtx.Id] = serviceRunner.Process;
             }
         }
 
-        public static object Execute(IRequest request, object instance, object requestDto, string requestName)
+        public static object Execute(IRequestContext requestContext,
+                                     object instance, object request, string requestName)
         {
-            var actionName = request.Verb 
-                ?? HttpMethods.Post; //MQ Services
+            var actionName = requestContext != null
+                ? requestContext.Get<IHttpRequest>().HttpMethod
+                : HttpMethods.Post; //MQ Services
 
             InstanceExecFn action;
             if (execMap.TryGetValue(ActionContext.Key(actionName, requestName), out action)
                 || execMap.TryGetValue(ActionContext.AnyKey(requestName), out action))
             {
-                return action(request, instance, requestDto);
+                return action(requestContext, instance, request);
             }
 
             var expectedMethodName = actionName.Substring(0, 1) + actionName.Substring(1).ToLower();
             throw new NotImplementedException(
                 "Could not find method named {1}({0}) or Any({0}) on Service {2}"
-                .Fmt(requestDto.GetType().GetOperationName(), expectedMethodName, typeof(TService).GetOperationName()));
+                .Fmt(request.GetType().Name, expectedMethodName, typeof(TService).Name));
         }
     }
 }

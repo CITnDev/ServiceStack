@@ -1,12 +1,15 @@
 ﻿using System;
 using System.Collections.Specialized;
 using System.Linq;
-using ServiceStack.Auth;
-using ServiceStack.Configuration;
-using ServiceStack.Host;
-using ServiceStack.Web;
+using ServiceStack.Common;
+using ServiceStack.Common.Web;
+using ServiceStack.ServiceHost;
+using ServiceStack.ServiceInterface.Auth;
+using ServiceStack.Text;
+using ServiceStack.WebHost.Endpoints;
+using ServiceStack.WebHost.Endpoints.Extensions;
 
-namespace ServiceStack
+namespace ServiceStack.ServiceInterface
 {
     /// <summary>
     /// Indicates that the request dto, which is associated with this attribute,
@@ -32,11 +35,11 @@ namespace ServiceStack
         public AuthenticateAttribute(ApplyTo applyTo)
             : base(applyTo)
         {
-            this.Priority = (int)RequestFilterPriority.Authenticate;
+            this.Priority = (int) RequestFilterPriority.Authenticate;
         }
 
         public AuthenticateAttribute()
-            : this(ApplyTo.All) { }
+            : this(ApplyTo.All) {}
 
         public AuthenticateAttribute(string provider)
             : this(ApplyTo.All)
@@ -50,13 +53,13 @@ namespace ServiceStack
             this.Provider = provider;
         }
 
-        public override void Execute(IRequest req, IResponse res, object requestDto)
+        public override void Execute(IHttpRequest req, IHttpResponse res, object requestDto)
         {
-            if (AuthenticateService.AuthProviders == null)
+            if (AuthService.AuthProviders == null) 
                 throw new InvalidOperationException(
                     "The AuthService must be initialized by calling AuthService.Init to use an authenticate attribute");
 
-            var matchingOAuthConfigs = AuthenticateService.AuthProviders.Where(x =>
+            var matchingOAuthConfigs = AuthService.AuthProviders.Where(x =>
                 this.Provider.IsNullOrEmpty()
                 || x.Provider == this.Provider).ToList();
 
@@ -83,16 +86,16 @@ namespace ServiceStack
             }
         }
 
-        protected bool DoHtmlRedirectIfConfigured(IRequest req, IResponse res, bool includeRedirectParam = false)
+        protected bool DoHtmlRedirectIfConfigured(IHttpRequest req, IHttpResponse res, bool includeRedirectParam = false)
         {
-            var htmlRedirect = this.HtmlRedirect ?? AuthenticateService.HtmlRedirect;
-            if (htmlRedirect != null && req.ResponseContentType.MatchesContentType(MimeTypes.Html))
+            var htmlRedirect = this.HtmlRedirect ?? AuthService.HtmlRedirect;
+            if (htmlRedirect != null && req.ResponseContentType.MatchesContentType(ContentType.Html))
             {
                 var url = req.ResolveAbsoluteUrl(htmlRedirect);
                 if (includeRedirectParam)
                 {
                     var absoluteRequestPath = req.ResolveAbsoluteUrl("~" + req.PathInfo + ToQueryString(req.QueryString));
-                    url = url.AddQueryParam(HostContext.ResolveLocalizedString(LocalizedStrings.Redirect), absoluteRequestPath);
+                    url = url.AddQueryParam("redirect", absoluteRequestPath);
                 }
 
                 res.RedirectToUrl(url);
@@ -102,7 +105,7 @@ namespace ServiceStack
             return false;
         }
 
-        public static void AuthenticateIfBasicAuth(IRequest req, IResponse res)
+        public static void AuthenticateIfBasicAuth(IHttpRequest req, IHttpResponse res)
         {
             //Need to run SessionFeature filter since its not executed before this attribute (Priority -100)			
             SessionFeature.AddSessionIdToRequestFilter(req, res, null); //Required to get req.GetSessionId()
@@ -110,18 +113,16 @@ namespace ServiceStack
             var userPass = req.GetBasicAuthUserAndPassword();
             if (userPass != null)
             {
-                var authService = ((IResolver) req).TryResolve<AuthenticateService>();
-                authService.Request = req;
-                var response = authService.Post(new Authenticate
-                {
+                var authService = req.TryResolve<AuthService>();
+                authService.RequestContext = new HttpRequestContext(req, res, null);
+                var response = authService.Post(new Auth.Auth {
                     provider = BasicAuthProvider.Name,
                     UserName = userPass.Value.Key,
                     Password = userPass.Value.Value
                 });
             }
         }
-
-        public static void AuthenticateIfDigestAuth(IRequest req, IResponse res)
+        public static void AuthenticateIfDigestAuth(IHttpRequest req, IHttpResponse res)
         {
             //Need to run SessionFeature filter since its not executed before this attribute (Priority -100)			
             SessionFeature.AddSessionIdToRequestFilter(req, res, null); //Required to get req.GetSessionId()
@@ -129,9 +130,9 @@ namespace ServiceStack
             var digestAuth = req.GetDigestAuth();
             if (digestAuth != null)
             {
-                var authService = ((IResolver) req).TryResolve<AuthenticateService>();
-                authService.Request = req;
-                var response = authService.Post(new Authenticate
+                var authService = req.TryResolve<AuthService>();
+                authService.RequestContext = new HttpRequestContext(req, res, null);
+                var response = authService.Post(new Auth.Auth
                 {
                     provider = DigestAuthProvider.Name,
                     nonce = digestAuth["nonce"],
@@ -145,11 +146,7 @@ namespace ServiceStack
             }
         }
 
-        private static string ToQueryString(INameValueCollection queryStringCollection)
-        {
-            return ToQueryString((NameValueCollection)queryStringCollection.Original);
-        }
-
+        // Not sure if this should be made re-useable within SS.Text with the other NVC extension methods?
         private static string ToQueryString(NameValueCollection queryStringCollection)
         {
             if (queryStringCollection == null || queryStringCollection.Count == 0)
@@ -157,6 +154,5 @@ namespace ServiceStack
 
             return "?" + queryStringCollection.ToFormUrlEncoded();
         }
-
     }
 }

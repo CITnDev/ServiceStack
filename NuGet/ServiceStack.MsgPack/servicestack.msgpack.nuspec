@@ -1,28 +1,27 @@
 <?xml version="1.0"?>
 <package xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
   <metadata xmlns="http://schemas.microsoft.com/packaging/2010/07/nuspec.xsd">
-    <id>ServiceStack.MsgPack</id>
+    <id>ServiceStack.Plugins.MsgPack</id>
     <title>Message Pack support for ServiceStack. Includes typed MsgPack Client</title>
-    <version>4.0.0</version>
-    <authors>Service Stack</authors>
-    <owners>Service Stack</owners>
+    <version>3.9.60</version>
+    <authors>Demis Bellot</authors>
+    <owners>Demis Bellot</owners>
     <summary>MsgPack Format Serializer ContentType ServiceClients for ServiceStack</summary>
     <description>
       Add the MsgPack binary format and endpoint to a ServiceStack web service host.
     </description>
     <projectUrl>https://github.com/ServiceStack/ServiceStack</projectUrl>
-    <licenseUrl>https://servicestack.net/terms</licenseUrl>
-    <iconUrl>https://servicestack.net/img/logo-32.png</iconUrl>
+    <licenseUrl>https://github.com/ServiceStack/ServiceStack/blob/v3/LICENSE</licenseUrl>
+    <iconUrl>http://www.servicestack.net/logo-100x100.png</iconUrl>
     <tags>MsgPack MessagePack Message Pack Fast Binary Serializer Format ContentType REST Web Services ServiceStack</tags>
     <language>en-US</language>
-    <copyright>Copyright 2013 Service Stack</copyright>
+    <copyright>servicestack.net 2012 and contributors</copyright>
     <dependencies>
-      <dependency id="ServiceStack.Client" version="4.0" />
-      <dependency id="MsgPack.Cli" version="0.4.2" />
+      <dependency id="ServiceStack.Common" version="[3,4)" />
     </dependencies>
   </metadata>
   <files>
     <file src="lib\**\*.*" target="lib" />
-    <file src="..\..\src\ServiceStack.MsgPack\**\*.cs" target="src" />
+    <file src="..\..\src\ServiceStack.Plugins.MsgPack\**\*.cs" target="src" />
   </files>
 </package>

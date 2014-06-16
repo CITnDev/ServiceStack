@@ -1,16 +1,13 @@
-﻿// Copyright (c) Service Stack LLC. All Rights Reserved.
-// License: https://raw.github.com/ServiceStack/ServiceStack/master/license.txt
-
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text.RegularExpressions;
 
-namespace ServiceStack
+namespace ServiceStack.Common
 {
     public static class StringUtils
     {
-#if !SL5
+#if !SILVERLIGHT
         static readonly Regex StripHtmlUnicodeRegEx = new Regex(@"&(#)?([xX])?([^ \f\n\r\t\v;]+);", RegexOptions.Compiled);
 #else
         static readonly Regex StripHtmlUnicodeRegEx = new Regex(@"&(#)?([xX])?([^ \f\n\r\t\v;]+);");
@@ -59,10 +56,10 @@ namespace ServiceStack
         {
             return Convert.ToChar(codePoint).ToString(CultureInfo.InvariantCulture);
         }
-        
+
         // http://www.w3.org/TR/html5/entities.json
         // TODO: conditional compilation for NET45 that uses ReadOnlyDictionary
-        public static readonly IDictionary<string, string> HtmlCharacterCodes = new SortedDictionary<string, string>
+        public static readonly IDictionary<string, string> HtmlCharacterCodes = new Dictionary<string, string>()
 		{
 		    { @"&Aacute;", 193.ToChar() },
 			{ @"&aacute;", 225.ToChar() },

@@ -1,10 +1,13 @@
 using System;
 using System.Configuration;
-using ServiceStack.Host;
+using System.Runtime.Serialization;
+using ServiceStack.Common.Web;
+using ServiceStack.ServiceHost;
+using ServiceStack.ServiceInterface.ServiceModel;
 using ServiceStack.Text;
-using ServiceStack.Web;
+using ServiceStack.WebHost.Endpoints;
 
-namespace ServiceStack.Auth
+namespace ServiceStack.ServiceInterface.Auth
 {
     /// <summary>
     /// Inject logic into existing services by introspecting the request and injecting your own
@@ -18,12 +21,45 @@ namespace ServiceStack.Auth
     /// <returns>Response DTO; non-null will short-circuit execution and return that response</returns>
     public delegate object ValidateFn(IServiceBase service, string httpMethod, object requestDto);
 
-    [DefaultRequest(typeof(Authenticate))]
-    public class AuthenticateService : Service
+    [DataContract]
+    public class Auth : IReturn<AuthResponse>
+    {
+        [DataMember(Order=1)] public string provider { get; set; }
+        [DataMember(Order=2)] public string State { get; set; }
+        [DataMember(Order=3)] public string oauth_token { get; set; }
+        [DataMember(Order=4)] public string oauth_verifier { get; set; }
+        [DataMember(Order=5)] public string UserName { get; set; }
+        [DataMember(Order=6)] public string Password { get; set; }
+        [DataMember(Order=7)] public bool? RememberMe { get; set; }
+        [DataMember(Order=8)] public string Continue { get; set; }
+        // Thise are used for digest auth
+        [DataMember(Order=9)] public string nonce { get; set; }
+        [DataMember(Order=10)] public string uri { get; set; }
+        [DataMember(Order=11)] public string response { get; set; }
+        [DataMember(Order=12)] public string qop { get; set; }
+        [DataMember(Order=13)] public string nc { get; set; }
+        [DataMember(Order=14)] public string cnonce { get; set; }
+    }
+
+    [DataContract]
+    public class AuthResponse
+    {
+        public AuthResponse()
+        {
+            this.ResponseStatus = new ResponseStatus();
+        }
+
+        [DataMember(Order=1)] public string SessionId { get; set; }
+        [DataMember(Order=2)] public string UserName { get; set; }
+        [DataMember(Order=3)] public string ReferrerUrl { get; set; }
+        [DataMember(Order=4)] public ResponseStatus ResponseStatus { get; set; }
+    }
+
+    [DefaultRequest(typeof(Auth))]
+    public class AuthService : Service
     {
         public const string BasicProvider = "basic";
         public const string CredentialsProvider = "credentials";
-        public const string CredentialsAliasProvider = "login";
         public const string LogoutAction = "logout";
         public const string DigestProvider = "digest";
 
@@ -34,8 +70,9 @@ namespace ServiceStack.Auth
         public static string DefaultOAuthRealm { get; private set; }
         public static string HtmlRedirect { get; internal set; }
         public static IAuthProvider[] AuthProviders { get; private set; }
-        
-        static AuthenticateService()
+
+
+        static AuthService()
         {
             CurrentSessionFactory = () => new AuthUserSession();
         }
@@ -57,6 +94,8 @@ namespace ServiceStack.Auth
 
         public static void Init(Func<IAuthSession> sessionFactory, params IAuthProvider[] authProviders)
         {
+            EndpointHost.AssertTestConfig();
+
             if (authProviders.Length == 0)
                 throw new ArgumentNullException("authProviders");
 
@@ -74,14 +113,14 @@ namespace ServiceStack.Auth
                 throw new ConfigurationException("No OAuth providers have been registered in your AppHost.");
         }
 
-        public void Options(Authenticate request) { }
+        public virtual void Options(Auth request) {}
 
-        public object Get(Authenticate request)
+        public virtual object Get(Auth request)
         {
             return Post(request);
         }
 
-        public object Post(Authenticate request)
+        public virtual object Post(Auth request)
         {
             AssertAuthProviders();
 
@@ -97,23 +136,21 @@ namespace ServiceStack.Auth
                     ? SessionOptions.Permanent
                     : SessionOptions.Temporary;
 
-                base.Request.AddSessionOptions(opt);
+                base.RequestContext.Get<IHttpResponse>()
+                    .AddSessionOptions(base.RequestContext.Get<IHttpRequest>(), opt);
             }
 
             var provider = request.provider ?? AuthProviders[0].Provider;
-            if (provider == CredentialsAliasProvider)
-                provider = CredentialsProvider;
-
             var oAuthConfig = GetAuthProvider(provider);
             if (oAuthConfig == null)
                 throw HttpError.NotFound("No configuration was added for OAuth provider '{0}'".Fmt(provider));
 
-            if (LogoutAction.EqualsIgnoreCase(request.provider))
+            if (request.provider == LogoutAction)
                 return oAuthConfig.Logout(this, request);
 
             var session = this.GetSession();
 
-            var isHtml = base.Request.ResponseContentType.MatchesContentType(MimeTypes.Html);
+            var isHtml = base.RequestContext.ResponseContentType.MatchesContentType(ContentType.Html);
             try
             {
                 var response = Authenticate(request, provider, session, oAuthConfig);
@@ -124,12 +161,11 @@ namespace ServiceStack.Auth
 
                 var referrerUrl = request.Continue
                     ?? session.ReferrerUrl
-                    ?? this.Request.GetHeader("Referer")
+                    ?? this.RequestContext.GetHeader("Referer")
                     ?? oAuthConfig.CallbackUrl;
 
                 var alreadyAuthenticated = response == null;
-                response = response ?? new AuthenticateResponse {
-                    UserId = session.UserAuthId,
+                response = response ?? new AuthResponse {
                     UserName = session.UserAuthName,
                     SessionId = session.Id,
                     ReferrerUrl = referrerUrl,
@@ -152,7 +188,7 @@ namespace ServiceStack.Auth
             }
             catch (HttpError ex)
             {
-                var errorReferrerUrl = this.Request.GetHeader("Referer");
+                var errorReferrerUrl = this.RequestContext.GetHeader("Referer");
                 if (isHtml && errorReferrerUrl != null)
                 {
                     errorReferrerUrl = errorReferrerUrl.SetQueryParam("error", ex.Message);
@@ -168,50 +204,33 @@ namespace ServiceStack.Auth
         /// </summary>
         /// <param name="request"></param>
         /// <returns>null; if already autenticated otherwise a populated instance of AuthResponse</returns>
-        public AuthenticateResponse Authenticate(Authenticate request)
+        public virtual AuthResponse Authenticate(Auth request)
         {
             //Remove HTML Content-Type to avoid auth providers issuing browser re-directs
-            var hold = this.Request.ResponseContentType;
-            try
-            {
-                this.Request.ResponseContentType = MimeTypes.PlainText;
+            ((HttpRequestContext)this.RequestContext).ResponseContentType = ContentType.PlainText;
 
-                if (request.RememberMe.HasValue)
-                {
-                    var opt = request.RememberMe.GetValueOrDefault(false)
-                        ? SessionOptions.Permanent
-                        : SessionOptions.Temporary;
+            var provider = request.provider ?? AuthProviders[0].Provider;
+            var oAuthConfig = GetAuthProvider(provider);
+            if (oAuthConfig == null)
+                throw HttpError.NotFound("No configuration was added for OAuth provider '{0}'".Fmt(provider));
 
-                    base.Request.AddSessionOptions(opt);
-                }
+            if (request.provider == LogoutAction)
+                return oAuthConfig.Logout(this, request) as AuthResponse;
 
-                var provider = request.provider ?? AuthProviders[0].Provider;
-                var oAuthConfig = GetAuthProvider(provider);
-                if (oAuthConfig == null)
-                    throw HttpError.NotFound("No configuration was added for OAuth provider '{0}'".Fmt(provider));
+            var result = Authenticate(request, provider, this.GetSession(), oAuthConfig);
+            var httpError = result as HttpError;
+            if (httpError != null)
+                throw httpError;
 
-                if (request.provider == LogoutAction)
-                    return oAuthConfig.Logout(this, request) as AuthenticateResponse;
-
-                var result = Authenticate(request, provider, this.GetSession(), oAuthConfig);
-                var httpError = result as HttpError;
-                if (httpError != null)
-                    throw httpError;
-
-                return result as AuthenticateResponse;
-            }
-            finally
-            {
-                this.Request.ResponseContentType = hold;
-            }
+            return result as AuthResponse;
         }
 
         /// <summary>
         /// The specified <paramref name="session"/> may change as a side-effect of this method. If
         /// subsequent code relies on current <see cref="IAuthSession"/> data be sure to reload
-        /// the session istance via <see cref="ServiceExtensions.GetSession(IServiceBase,bool)"/>.
+        /// the session istance via <see cref="ServiceExtensions.GetSession(ServiceStack.ServiceInterface.IServiceBase,bool)"/>.
         /// </summary>
-        private object Authenticate(Authenticate request, string provider, IAuthSession session, IAuthProvider oAuthConfig)
+        private object Authenticate(Auth request, string provider, IAuthSession session, IAuthProvider oAuthConfig)
         {
             object response = null;
             if (!oAuthConfig.IsAuthorized(session, session.GetOAuthTokens(provider), request))
@@ -221,7 +240,7 @@ namespace ServiceStack.Auth
             return response;
         }
 
-        public object Delete(Authenticate request)
+        public virtual object Delete(Auth request)
         {
             if (ValidateFn != null)
             {
@@ -231,7 +250,7 @@ namespace ServiceStack.Auth
 
             this.RemoveSession();
 
-            return new AuthenticateResponse();
+            return new AuthResponse();
         }
     }
 

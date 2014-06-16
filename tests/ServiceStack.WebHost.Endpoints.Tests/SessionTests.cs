@@ -1,11 +1,11 @@
-﻿// Copyright (c) Service Stack LLC. All Rights Reserved.
-// License: https://raw.github.com/ServiceStack/ServiceStack/master/license.txt
-
-
-using System;
+﻿using System;
 using Funq;
 using NUnit.Framework;
-using ServiceStack.Auth;
+using ServiceStack.Common;
+using ServiceStack.ServiceClient.Web;
+using ServiceStack.ServiceHost;
+using ServiceStack.ServiceInterface;
+using ServiceStack.ServiceInterface.Auth;
 
 namespace ServiceStack.WebHost.Endpoints.Tests
 {
@@ -28,13 +28,13 @@ namespace ServiceStack.WebHost.Endpoints.Tests
 
     public class SessionTypedIncr : IReturn<AuthUserSession> {}
 
-    public class SessionService : Service
+    public class SessionService : ServiceInterface.Service
     {
         public SessionResponse Get(SessionIncr request)
         {
-            var counter = base.SessionBag.Get<int>("counter");
+            var counter = base.Session.Get<int>("counter");
 
-            base.SessionBag["counter"] = ++counter;
+            base.Session["counter"] = ++counter;
 
             return new SessionResponse
             {
@@ -45,10 +45,10 @@ namespace ServiceStack.WebHost.Endpoints.Tests
         public Cart Get(SessionCartIncr request)
         {
             var sessionKey = UrnId.Create<Cart>(request.CartId);
-            var cart = base.SessionBag.Get<Cart>(sessionKey) ?? new Cart();
+            var cart = base.Session.Get<Cart>(sessionKey) ?? new Cart();
             cart.Qty++;
 
-            base.SessionBag[sessionKey] = cart;
+            base.Session[sessionKey] = cart;
 
             return cart;
         }

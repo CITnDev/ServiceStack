@@ -948,6 +948,5 @@ Demis / Bellot
             templateOutput.Print();
             Assert.That(templateOutput, Is.EqualTo(expectedHtml));
         }
-
     }
 }

@@ -2,8 +2,10 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using ServiceStack.Common;
 using ServiceStack.IO;
 using ServiceStack.Text;
+using ServiceStack.WebHost.Endpoints;
 
 namespace ServiceStack.VirtualPath
 {
@@ -79,14 +81,14 @@ namespace ServiceStack.VirtualPath
 
         public override IEnumerable<IVirtualFile> Files
         {
-            get { return files; }
+            get { return files.Cast<IVirtualFile>(); }
         }
 
         public List<InMemoryVirtualDirectory> dirs;
 
         public override IEnumerable<IVirtualDirectory> Directories
         {
-            get { return dirs; }
+            get { return dirs.Cast<IVirtualDirectory>(); }
         }
 
         public string DirName { get; set; }
@@ -151,7 +153,7 @@ namespace ServiceStack.VirtualPath
                 return filePath;
 
             if (DirSeps.Any(d => filePath[0] == d))
-                    return filePath.Substring(1);
+                 return filePath.Substring(1);
 
             return filePath;
         }
@@ -179,18 +181,6 @@ namespace ServiceStack.VirtualPath
             get { return FileLastModified; }
         }
 
-        public override long Length
-        {
-            get
-            {
-                return TextContents != null ? 
-                    TextContents.Length 
-                      : ByteContents != null ? 
-                    ByteContents.Length : 
-                    0;
-            }
-        }
-
         public string TextContents { get; set; }
 
         public byte[] ByteContents { get; set; }
@@ -200,4 +190,6 @@ namespace ServiceStack.VirtualPath
             return new MemoryStream(ByteContents ?? (TextContents ?? "").ToUtf8Bytes());
         }
     }
+
+
 }

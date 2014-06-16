@@ -1,8 +1,9 @@
-﻿using System.Threading.Tasks;
+﻿using System;
+using System.Threading.Tasks;
 using NUnit.Framework;
 using ServiceStack.Html;
 using ServiceStack.Razor;
-using ServiceStack.Testing;
+using ServiceStack.ServiceInterface.Testing;
 using ServiceStack.Text;
 using ServiceStack.VirtualPath;
 
@@ -12,20 +13,6 @@ namespace ServiceStack.ServiceHost.Tests.Formats_Razor
     public class RazorEngineTests
     {
         const string LayoutHtml = "<html><body><div>@RenderSection(\"Title\")</div>@RenderBody()</body></html>";
-
-        private ServiceStackHost appHost;
-
-        [TestFixtureSetUp]
-        public void TestFixtureSetUp()
-        {
-            appHost = new BasicAppHost().Init();
-        }
-
-        [TestFixtureTearDown]
-        public void TestFixtureTearDown()
-        {
-            appHost.Dispose();
-        }
 
         protected RazorFormat RazorFormat;
 
@@ -44,7 +31,7 @@ namespace ServiceStack.ServiceHost.Tests.Formats_Razor
             RazorFormat = new RazorFormat
             {
                 VirtualPathProvider = fileSystem,
-                PageBaseType = typeof(CustomRazorBasePage<>),
+                PageBaseType = typeof (CustomRazorBasePage<>),
                 EnableLiveReload = false,
                 PrecompilePages = PrecompileEnabled,
                 WaitForPrecompilationOnStartup = WaitForPrecompileEnabled,
@@ -141,6 +128,5 @@ namespace ServiceStack.ServiceHost.Tests.Formats_Razor
                 Assert.That(result, Is.EqualTo("This is my sample template, Hello World!"));
             });
         }
-
     }
 }

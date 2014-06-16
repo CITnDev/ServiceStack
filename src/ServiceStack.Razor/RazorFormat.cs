@@ -1,13 +1,15 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
-using ServiceStack.Host;
+using System.Linq;
 using ServiceStack.Html;
 using ServiceStack.IO;
 using ServiceStack.Logging;
 using ServiceStack.Razor.Managers;
+using ServiceStack.ServiceHost;
+using ServiceStack.Text;
 using ServiceStack.VirtualPath;
-using ServiceStack.Web;
+using ServiceStack.WebHost.Endpoints;
 
 namespace ServiceStack.Razor
 {
@@ -36,10 +38,10 @@ namespace ServiceStack.Razor
         public string DefaultPageName { get; set; }
         public string WebHostUrl { get; set; }
         public string ScanRootPath { get; set; }
-        public List<Predicate<string>> Deny { get; set; }
         public bool? EnableLiveReload { get; set; }
-        public bool? PrecompilePages { get; set; }
-        public bool? WaitForPrecompilationOnStartup { get; set; }
+        public List<Predicate<string>> Deny { get; set; }
+        public bool PrecompilePages { get; set; }
+        public bool WaitForPrecompilationOnStartup { get; set; }
         public IVirtualPathProvider VirtualPathProvider { get; set; }
         public ILiveReload LiveReload { get; set; }
         public Func<RazorViewManager, ILiveReload> LiveReloadFactory { get; set; }
@@ -66,8 +68,6 @@ namespace ServiceStack.Razor
             this.VirtualPathProvider = VirtualPathProvider ?? appHost.VirtualPathProvider;
             this.WebHostUrl = WebHostUrl ?? appHost.Config.WebHostUrl;
             this.EnableLiveReload = this.EnableLiveReload ?? appHost.Config.DebugMode;
-            this.PrecompilePages = this.PrecompilePages ?? !this.EnableLiveReload;
-            this.WaitForPrecompilationOnStartup = this.WaitForPrecompilationOnStartup ?? !this.EnableLiveReload;
 
             try
             {
@@ -77,7 +77,7 @@ namespace ServiceStack.Razor
             }
             catch (Exception ex)
             {
-                appHost.NotifyStartupException(ex);
+                ex.StackTrace.PrintDump();
                 throw;
             }
         }
@@ -150,12 +150,12 @@ namespace ServiceStack.Razor
             return ViewManager.GetPageByPathInfo(pathInfo);
         }
 
-        public void ProcessRazorPage(IRequest httpReq, RazorPage contentPage, object model, IResponse httpRes)
+        public void ProcessRazorPage(IHttpRequest httpReq, RazorPage contentPage, object model, IHttpResponse httpRes)
         {
             PageResolver.ResolveAndExecuteRazorPage(httpReq, httpRes, model, contentPage);
         }
 
-        public void ProcessRequest(IRequest httpReq, IResponse httpRes, object dto)
+        public void ProcessRequest(IHttpRequest httpReq, IHttpResponse httpRes, object dto)
         {
             PageResolver.ProcessRequest(httpReq, httpRes, dto);
         }
@@ -216,19 +216,23 @@ namespace ServiceStack.Razor
             if (razorPage == null)
                 throw new ArgumentNullException("razorPage");
 
-            var httpReq = new BasicRequest();
+            var mqContext = new MqRequestContext();
+
+            var httpReq = new MqRequest(mqContext);
             if (layout != null)
             {
                 httpReq.Items[RazorPageResolver.LayoutKey] = layout;
             }
 
+            var httpRes = new MqResponse(mqContext);
+
             razorView = PageResolver.ResolveAndExecuteRazorPage(
                 httpReq: httpReq,
-                httpRes: httpReq.Response,
+                httpRes: httpRes,
                 model: model,
                 razorPage: razorPage);
 
-            var ms = (MemoryStream)httpReq.Response.OutputStream;
+            var ms = (MemoryStream)httpRes.OutputStream;
             return ms.ToArray().FromUtf8Bytes();
         }
     }
@@ -241,8 +245,8 @@ namespace ServiceStack.Razor
         string ScanRootPath { get; }
         string WebHostUrl { get; }
         List<Predicate<string>> Deny { get; }
-        bool? PrecompilePages { get; set; }
-        bool? WaitForPrecompilationOnStartup { get; set; }
+        bool PrecompilePages { get; set; }
+        bool WaitForPrecompilationOnStartup { get; set; }
     }
 
 }

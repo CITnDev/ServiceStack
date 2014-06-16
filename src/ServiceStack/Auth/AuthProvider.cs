@@ -1,31 +1,28 @@
 using System;
 using System.Collections.Generic;
-using System.Configuration;
 using System.Net;
+using ServiceStack.Common;
+using ServiceStack.Common.Web;
 using ServiceStack.Configuration;
 using ServiceStack.Logging;
+using ServiceStack.ServiceHost;
 using ServiceStack.Text;
-using ServiceStack.Web;
 
-namespace ServiceStack.Auth
+namespace ServiceStack.ServiceInterface.Auth
 {
     public abstract class AuthProvider : IAuthProvider
     {
         protected static readonly ILog Log = LogManager.GetLogger(typeof(AuthProvider));
 
-        public TimeSpan SessionExpiry { get; set; }
+        public TimeSpan? SessionExpiry { get; set; }
         public string AuthRealm { get; set; }
         public string Provider { get; set; }
         public string CallbackUrl { get; set; }
         public string RedirectUrl { get; set; }
 
-        protected AuthProvider()
-        {
-            this.SessionExpiry = SessionFeature.DefaultSessionExpiry;
-        }
+        protected AuthProvider() { }
 
-        protected AuthProvider(IAppSettings appSettings, string authRealm, string oAuthProvider)
-            : this()
+        protected AuthProvider(IResourceManager appSettings, string authRealm, string oAuthProvider)
         {
             // Enhancement per https://github.com/ServiceStack/ServiceStack/issues/741
             this.AuthRealm = appSettings != null ? appSettings.Get("OAuthRealm", authRealm) : authRealm;
@@ -38,6 +35,7 @@ namespace ServiceStack.Auth
                 this.RedirectUrl = appSettings.GetString("oauth.{0}.RedirectUrl".Fmt(oAuthProvider))
                     ?? FallbackConfig(appSettings.GetString("oauth.RedirectUrl"));
             }
+            this.SessionExpiry = SessionFeature.DefaultSessionExpiry;
         }
 
         /// <summary>
@@ -59,29 +57,29 @@ namespace ServiceStack.Auth
         /// <param name="service"></param>
         /// <param name="request"></param>
         /// <returns></returns>
-        public virtual object Logout(IServiceBase service, Authenticate request)
+        public virtual object Logout(IServiceBase service, Auth request)
         {
             var session = service.GetSession();
             var referrerUrl = (request != null ? request.Continue : null)
                 ?? session.ReferrerUrl
-                ?? service.Request.GetHeader("Referer")
+                ?? service.RequestContext.GetHeader("Referer")
                 ?? this.CallbackUrl;
 
             session.OnLogout(service);
 
             service.RemoveSession();
 
-            if (service.Request.ResponseContentType == MimeTypes.Html && !String.IsNullOrEmpty(referrerUrl))
+            if (service.RequestContext.ResponseContentType == ContentType.Html && !String.IsNullOrEmpty(referrerUrl))
                 return service.Redirect(referrerUrl.AddHashParam("s", "-1"));
 
-            return new AuthenticateResponse();
+            return new AuthResponse();
         }
 
         /// <summary>
         /// Saves the Auth Tokens for this request. Called in OnAuthenticated(). 
         /// Overrideable, the default behaviour is to call IUserAuthRepository.CreateOrMergeAuthSession().
         /// </summary>
-        protected virtual void SaveUserAuth(IServiceBase authService, IAuthSession session, IAuthRepository authRepo, IAuthTokens tokens)
+        protected virtual void SaveUserAuth(IServiceBase authService, IAuthSession session, IUserAuthRepository authRepo, IOAuthTokens tokens)
         {
             if (authRepo == null) return;
             if (tokens != null)
@@ -93,7 +91,7 @@ namespace ServiceStack.Auth
 
             foreach (var oAuthToken in session.ProviderOAuthAccess)
             {
-                var authProvider = AuthenticateService.GetAuthProvider(oAuthToken.Provider);
+                var authProvider = AuthService.GetAuthProvider(oAuthToken.Provider);
                 if (authProvider == null) continue;
                 var userAuthProvider = authProvider as OAuthProvider;
                 if (userAuthProvider != null)
@@ -104,7 +102,7 @@ namespace ServiceStack.Auth
 
             authRepo.SaveUserAuth(session);
 
-            var httpRes = authService.Request.Response as IHttpResponse;
+            var httpRes = authService.RequestContext.Get<IHttpResponse>();
             if (httpRes != null)
             {
                 httpRes.Cookies.AddPermanentCookie(HttpHeaders.XUserAuthId, session.UserAuthId);
@@ -114,7 +112,7 @@ namespace ServiceStack.Auth
 
         public virtual void OnSaveUserAuth(IServiceBase authService, IAuthSession session) { }
 
-        public virtual void OnAuthenticated(IServiceBase authService, IAuthSession session, IAuthTokens tokens, Dictionary<string, string> authInfo)
+        public virtual void OnAuthenticated(IServiceBase authService, IAuthSession session, IOAuthTokens tokens, Dictionary<string, string> authInfo)
         {
             var userSession = session as AuthUserSession;
             if (userSession != null)
@@ -122,7 +120,7 @@ namespace ServiceStack.Auth
                 LoadUserAuthInfo(userSession, tokens, authInfo);
             }
 
-            var authRepo = authService.TryResolve<IAuthRepository>();
+            var authRepo = authService.TryResolve<IUserAuthRepository>();
             if (authRepo != null)
             {
                 if (tokens != null)
@@ -131,12 +129,12 @@ namespace ServiceStack.Auth
                     session.UserAuthId = authRepo.CreateOrMergeAuthSession(session, tokens);
                 }
                 //SaveUserAuth(authService, userSession, authRepo, tokens);
-
+                
                 authRepo.LoadUserAuth(session, tokens);
 
                 foreach (var oAuthToken in session.ProviderOAuthAccess)
                 {
-                    var authProvider = AuthenticateService.GetAuthProvider(oAuthToken.Provider);
+                    var authProvider = AuthService.GetAuthProvider(oAuthToken.Provider);
                     if (authProvider == null) continue;
                     var userAuthProvider = authProvider as OAuthProvider;
                     if (userAuthProvider != null)
@@ -144,27 +142,21 @@ namespace ServiceStack.Auth
                         userAuthProvider.LoadUserOAuthProvider(session, oAuthToken);
                     }
                 }
-
-                var httpRes = authService.Request.Response as IHttpResponse;
+        
+                var httpRes = authService.RequestContext.Get<IHttpResponse>();
                 if (httpRes != null)
                 {
                     httpRes.Cookies.AddPermanentCookie(HttpHeaders.XUserAuthId, session.UserAuthId);
                 }
-
+                
             }
 
-            try
-            {
-                session.IsAuthenticated = true;
-                session.OnAuthenticated(authService, session, tokens, authInfo);
-            }
-            finally
-            {
-                authService.SaveSession(session, SessionExpiry);
-            }
+            //OnSaveUserAuth(authService, session);
+            authService.SaveSession(session, SessionExpiry);
+            session.OnAuthenticated(authService, session, tokens, authInfo);
         }
 
-        protected virtual void LoadUserAuthInfo(AuthUserSession userSession, IAuthTokens tokens, Dictionary<string, string> authInfo) { }
+        protected virtual void LoadUserAuthInfo(AuthUserSession userSession, IOAuthTokens tokens, Dictionary<string, string> authInfo) { }
 
         protected static bool LoginMatchesSession(IAuthSession session, string userName)
         {
@@ -183,11 +175,11 @@ namespace ServiceStack.Auth
             return true;
         }
 
-        public abstract bool IsAuthorized(IAuthSession session, IAuthTokens tokens, Authenticate request = null);
+        public abstract bool IsAuthorized(IAuthSession session, IOAuthTokens tokens, Auth request = null);
 
-        public abstract object Authenticate(IServiceBase authService, IAuthSession session, Authenticate request);
+        public abstract object Authenticate(IServiceBase authService, IAuthSession session, Auth request);
 
-        public virtual void OnFailedAuthentication(IAuthSession session, IRequest httpReq, IResponse httpRes)
+        public virtual void OnFailedAuthentication(IAuthSession session, IHttpRequest httpReq, IHttpResponse httpRes)
         {
             httpRes.StatusCode = (int)HttpStatusCode.Unauthorized;
             httpRes.AddHeader(HttpHeaders.WwwAuthenticate, "{0} realm=\"{1}\"".Fmt(this.Provider, this.AuthRealm));
@@ -195,7 +187,7 @@ namespace ServiceStack.Auth
         }
 
         public static void HandleFailedAuth(IAuthProvider authProvider,
-            IAuthSession session, IRequest httpReq, IResponse httpRes)
+            IAuthSession session, IHttpRequest httpReq, IHttpResponse httpRes)
         {
             var baseAuthProvider = authProvider as AuthProvider;
             if (baseAuthProvider != null)
@@ -212,26 +204,11 @@ namespace ServiceStack.Auth
         }
     }
 
-    public static class AuthExtensions
+    public static class AuthConfigExtensions
     {
-        public static bool IsAuthorizedSafe(this IAuthProvider authProvider, IAuthSession session, IAuthTokens tokens)
+        public static bool IsAuthorizedSafe(this IAuthProvider authProvider, IAuthSession session, IOAuthTokens tokens)
         {
             return authProvider != null && authProvider.IsAuthorized(session, tokens);
-        }
-
-        public static IUserAuthRepository AsUserAuthRepository(this IAuthRepository authRepo, IResolver resolver = null)
-        {
-            if (resolver == null)
-                resolver = HostContext.AppHost;
-
-            var userAuthRepo = resolver.TryResolve<IUserAuthRepository>()
-                ?? (authRepo as IUserAuthRepository);
-
-            if (userAuthRepo == null)
-                throw new ConfigurationErrorsException(
-                    "Required dependency IAuthRepository or IUserAuthRepository could not be found.");
-
-            return userAuthRepo;
         }
     }
 

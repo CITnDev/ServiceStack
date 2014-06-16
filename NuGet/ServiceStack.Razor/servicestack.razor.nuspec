@@ -3,9 +3,9 @@
   <metadata xmlns="http://schemas.microsoft.com/packaging/2010/07/nuspec.xsd">
     <id>ServiceStack.Razor</id>
     <title>ServiceStack.Razor - ServiceStack's HTML story including MVC Razor</title>
-    <version>4.0.0</version>
-    <authors>Service Stack</authors>
-    <owners>Service Stack</owners>
+    <version>3.9.60</version>
+    <authors>Demis Bellot</authors>
+    <owners>Demis Bellot</owners>
     <summary>Provides ServiceStack's HTML Story including integrated support for MVC Razor's ViewEngine</summary>
     <description>
       ServiceStack Razor Documentation: http://razor.servicestack.net
@@ -22,15 +22,14 @@
       - Smart View Pages.
     </description>
     <projectUrl>http://razor.servicestack.net</projectUrl>
-    <licenseUrl>https://servicestack.net/terms</licenseUrl>
-    <requireLicenseAcceptance>true</requireLicenseAcceptance>
-    <iconUrl>https://servicestack.net/img/logo-32.png</iconUrl>
+    <licenseUrl>https://github.com/ServiceStack/ServiceStack/blob/v3/LICENSE</licenseUrl>
+    <iconUrl>http://www.servicestack.net/logo-100x100.png</iconUrl>
     <tags>Razor ViewEngine View Templates Controllers Mono ASP.NET Self-Host ServiceStack</tags>
     <language>en-US</language>
-    <copyright>Copyright 2013 Service Stack</copyright>
+    <copyright>servicestack.net 2012 and contributors</copyright>
     <dependencies>
-      <dependency id="ServiceStack" version="4.0" />
-      <dependency id="ServiceStack.OrmLite" version="4.0" />
+      <dependency id="ServiceStack" version="[3,4)" />
+      <dependency id="System.Web.Razor.Unofficial" />
     </dependencies>
   </metadata>
   <files>

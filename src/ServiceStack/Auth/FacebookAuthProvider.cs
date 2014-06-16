@@ -1,11 +1,13 @@
 using System;
 using System.Net;
 using System.Web;
+using ServiceStack.Common;
 using ServiceStack.Configuration;
+using ServiceStack.ServiceHost;
+using ServiceStack.ServiceModel;
 using ServiceStack.Text;
-using ServiceStack.Web;
 
-namespace ServiceStack.Auth
+namespace ServiceStack.ServiceInterface.Auth
 {
     /// <summary>
     /// Create a Facebook App at: https://developers.facebook.com/apps
@@ -21,7 +23,7 @@ namespace ServiceStack.Auth
         public string AppSecret { get; set; }
         public string[] Permissions { get; set; }
 
-        public FacebookAuthProvider(IAppSettings appSettings)
+        public FacebookAuthProvider(IResourceManager appSettings)
             : base(appSettings, Realm, Name, "AppId", "AppSecret")
         {
             this.AppId = appSettings.GetString("oauth.facebook.AppId");
@@ -29,20 +31,19 @@ namespace ServiceStack.Auth
             this.Permissions = appSettings.Get("oauth.facebook.Permissions", new string[0]);
         }
 
-        public override object Authenticate(IServiceBase authService, IAuthSession session, Authenticate request)
+        public override object Authenticate(IServiceBase authService, IAuthSession session, Auth request)
         {
             var tokens = Init(authService, ref session, request);
-            var httpRequest = authService.Request;
 
-            var error = httpRequest.QueryString["error"];
+            var error = authService.RequestContext.Get<IHttpRequest>().QueryString["error"];
             var hasError = !error.IsNullOrEmpty();
             if (hasError)
             {
-                Log.Error("Facebook error callback. {0}".Fmt(httpRequest.QueryString));
+                Log.Error("Facebook error callback. {0}".Fmt(authService.RequestContext.Get<IHttpRequest>().QueryString));
                 return authService.Redirect(session.ReferrerUrl);
-            } 
-            
-            var code = httpRequest.QueryString["code"];
+            }
+
+            var code = authService.RequestContext.Get<IHttpRequest>().QueryString["code"];
             var isPreAuthCallback = !code.IsNullOrEmpty();
             if (!isPreAuthCallback)
             {
@@ -81,7 +82,7 @@ namespace ServiceStack.Auth
             return authService.Redirect(session.ReferrerUrl.AddHashParam("f", "Unknown"));
         }
 
-        protected override void LoadUserAuthInfo(AuthUserSession userSession, IAuthTokens tokens, System.Collections.Generic.Dictionary<string, string> authInfo)
+        protected override void LoadUserAuthInfo(AuthUserSession userSession, IOAuthTokens tokens, System.Collections.Generic.Dictionary<string, string> authInfo)
         {
             try
             {
@@ -102,7 +103,7 @@ namespace ServiceStack.Auth
             }
         }
 
-        public override void LoadUserOAuthProvider(IAuthSession authSession, IAuthTokens tokens)
+        public override void LoadUserOAuthProvider(IAuthSession authSession, IOAuthTokens tokens)
         {
             var userSession = authSession as AuthUserSession;
             if (userSession == null) return;

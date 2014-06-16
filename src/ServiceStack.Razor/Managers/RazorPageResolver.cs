@@ -4,29 +4,30 @@ using System.Linq;
 using System.Net;
 using System.Text;
 using System.Web;
-using ServiceStack.Host.Handlers;
+using ServiceStack.Common;
+using ServiceStack.Common.Web;
 using ServiceStack.Html;
-using ServiceStack.Logging;
-using ServiceStack.Web;
+using ServiceStack.ServiceHost;
+using ServiceStack.Text;
+using ServiceStack.WebHost.Endpoints.Extensions;
+using ServiceStack.WebHost.Endpoints.Support;
 
 namespace ServiceStack.Razor.Managers
 {
-    public delegate string RenderPartialDelegate(string pageName, object model, bool renderHtml, StreamWriter writer = null, HtmlHelper htmlHelper = null, IRequest httpReq = null);
+    public delegate string RenderPartialDelegate(string pageName, object model, bool renderHtml, StreamWriter writer = null, HtmlHelper htmlHelper = null, IHttpRequest httpReq = null);
 
     /// <summary>
     /// A common hook into ServiceStack and the hosting infrastructure used to resolve requests.
     /// </summary>
-    public class RazorPageResolver : ServiceStackHandlerBase, IViewEngine
+    public class RazorPageResolver : EndpointHandlerBase, IViewEngine
     {
-        public static ILog Log = LogManager.GetLogger(typeof(RazorPageResolver));
-
         public const string ViewKey = "View";
         public const string LayoutKey = "Template";
         public const string QueryStringFormatKey = "format";
         public const string NoTemplateFormatValue = "bare";
         public const string DefaultLayoutName = "_Layout";
 
-        private static readonly UTF8Encoding UTF8EncodingWithoutBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+        private static readonly UTF8Encoding UTF8EncodingWithoutBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier:false);
 
         private readonly IRazorConfig config;
         private readonly RazorViewManager viewManager;
@@ -80,12 +81,9 @@ namespace ServiceStack.Razor.Managers
         /// <summary>
         /// This is called by the hosting environment via CatchAll usually for content pages.
         /// </summary>
-        public override void ProcessRequest(IRequest httpReq, IResponse httpRes, string operationName)
+        public override void ProcessRequest(IHttpRequest httpReq, IHttpResponse httpRes, string operationName)
         {
-            HostContext.ApplyCustomHandlerRequestFilters(httpReq, httpRes);
-            if (httpRes.IsClosed) return;
-
-            httpRes.ContentType = MimeTypes.Html;
+            httpRes.ContentType = ContentType.Html;
 
             ResolveAndExecuteRazorPage(httpReq, httpRes, null);
             httpRes.EndRequest(skipHeaders: true);
@@ -97,7 +95,7 @@ namespace ServiceStack.Razor.Managers
         /// allow another view engine to attempt to process it. If no view engines can process the DTO,
         /// HtmlFormat will simply handle it itself.
         /// </summary>
-        public virtual bool ProcessRequest(IRequest httpReq, IResponse httpRes, object dto)
+        public virtual bool ProcessRequest(IHttpRequest httpReq, IHttpResponse httpRes, object dto)
         {
             //for compatibility
             var httpResult = dto as IHttpResult;
@@ -116,7 +114,7 @@ namespace ServiceStack.Razor.Managers
             return true;
         }
 
-        public RazorPage FindRazorPage(IRequest httpReq, object model)
+        private RazorPage FindRazorPage(IHttpRequest httpReq, object model)
         {
             var viewName = httpReq.GetItem(ViewKey) as string;
             if (viewName != null)
@@ -128,7 +126,7 @@ namespace ServiceStack.Razor.Managers
             return razorPage;
         }
 
-        public IRazorView ResolveAndExecuteRazorPage(IRequest httpReq, IResponse httpRes, object model, RazorPage razorPage = null)
+        public IRazorView ResolveAndExecuteRazorPage(IHttpRequest httpReq, IHttpResponse httpRes, object model, RazorPage razorPage=null)
         {
             razorPage = razorPage ?? FindRazorPage(httpReq, model);
 
@@ -143,7 +141,7 @@ namespace ServiceStack.Razor.Managers
             var includeLayout = !(httpReq.GetParam(QueryStringFormatKey) ?? "").Contains(NoTemplateFormatValue);
             if (includeLayout)
             {
-                var result = ExecuteRazorPageWithLayout(httpReq, httpRes, model, page, () =>
+                var result = ExecuteRazorPageWithLayout(httpReq, httpRes, model, page, () => 
                     httpReq.GetItem(LayoutKey) as string
                     ?? page.Layout
                     ?? DefaultLayoutName);
@@ -162,7 +160,7 @@ namespace ServiceStack.Razor.Managers
             return page;
         }
 
-        private Tuple<IRazorView, string> ExecuteRazorPageWithLayout(IRequest httpReq, IResponse httpRes, object model, IRazorView page, Func<string> layout)
+        private Tuple<IRazorView, string> ExecuteRazorPageWithLayout(IHttpRequest httpReq, IHttpResponse httpRes, object model, IRazorView page, Func<string> layout)
         {
             using (var ms = new MemoryStream())
             {
@@ -189,39 +187,28 @@ namespace ServiceStack.Razor.Managers
             }
         }
 
-        private IRazorView CreateRazorPageInstance(IRequest httpReq, IResponse httpRes, object dto, RazorPage razorPage)
+        private IRazorView CreateRazorPageInstance(IHttpRequest httpReq, IHttpResponse httpRes, object dto, RazorPage razorPage)
         {
             viewManager.EnsureCompiled(razorPage);
 
             //don't proceed any further, the background compiler found there was a problem compiling the page, so throw instead
             if (razorPage.CompileException != null)
             {
-                if (Text.Env.IsMono)
-                {
-                    //Additional debug info Working around not displaying default exception in IHttpAsyncHandler
-                    var errors = razorPage.CompileException.Results.Errors;
-                    for (var i = 0; i < errors.Count; i++)
-                    {
-                        var error = errors[i];
-                        Log.Debug("{0} Line: {1}:{2}:".Fmt(error.FileName, error.Line, error.Column));
-                        Log.Debug("{0}: {1}".Fmt(error.ErrorNumber, error.ErrorText));
-                    }
-                } 
                 throw razorPage.CompileException;
             }
 
             //else, EnsureCompiled() ensures we have a page type to work with so, create an instance of the page
-            var page = (IRazorView)razorPage.ActivateInstance();
+            var page = (IRazorView) razorPage.ActivateInstance();
 
             page.Init(viewEngine: this, httpReq: httpReq, httpRes: httpRes);
 
             //deserialize the model.
             PrepareAndSetModel(page, httpReq, dto);
-
+        
             return page;
         }
 
-        private void PrepareAndSetModel(IRazorView page, IRequest httpReq, object dto)
+        private void PrepareAndSetModel(IRazorView page, IHttpRequest httpReq, object dto)
         {
             var hasModel = page as IHasModel;
             if (hasModel == null) return;
@@ -239,17 +226,17 @@ namespace ServiceStack.Razor.Managers
             hasModel.SetModel(model);
         }
 
-        public override object CreateRequest(IRequest request, string operationName)
+        public override object CreateRequest(IHttpRequest request, string operationName)
         {
             return null;
         }
 
-        public override object GetResponse(IRequest httpReq, object request)
+        public override object GetResponse(IHttpRequest httpReq, IHttpResponse httpRes, object request)
         {
             return null;
         }
 
-        public bool HasView(string viewName, IRequest httpReq = null)
+        public bool HasView(string viewName, IHttpRequest httpReq = null)
         {
             throw new NotImplementedException();
         }
@@ -272,7 +259,7 @@ namespace ServiceStack.Razor.Managers
                 }
                 else
                 {
-                    writer.Write("<!--No RenderPartialFn, skipping {0}-->".Fmt(pageName));
+                    writer.Write("<!--No RenderPartialFn, skipping {0}-->".Fmt(pageName));                    
                 }
             }
             return null;

@@ -1,6 +1,3 @@
-//Copyright (c) Service Stack LLC. All Rights Reserved.
-//License: https://raw.github.com/ServiceStack/ServiceStack/master/license.txt
-
 using System;
 using System.Collections.Generic;
 using System.Collections.Specialized;
@@ -8,37 +5,26 @@ using System.IO;
 using System.Net;
 using System.Web;
 using Funq;
-using ServiceStack.Logging;
-using ServiceStack.Web;
+using ServiceStack.Text;
+using ServiceStack.Common.Utils;
+using ServiceStack.Common.Web;
+using ServiceStack.ServiceHost;
 
-namespace ServiceStack.Host.AspNet
+namespace ServiceStack.WebHost.Endpoints.Extensions
 {
-    public class AspNetRequest
+    public class HttpRequestWrapper
         : IHttpRequest
     {
-        public static ILog log = LogManager.GetLogger(typeof(AspNetRequest));
-
+        private static readonly string physicalFilePath;
         public Container Container { get; set; }
-        private readonly HttpRequestBase request;
-        private readonly IHttpResponse response;
-        
-        public AspNetRequest(HttpContextBase httpContext, string operationName = null)
-            : this(httpContext, operationName, RequestAttributes.None)
+        private readonly HttpRequest request;
+
+        static HttpRequestWrapper()
         {
-            this.RequestAttributes = this.GetAttributes();
+            physicalFilePath = "~".MapHostAbsolutePath();
         }
 
-        public AspNetRequest(HttpContextBase httpContext, string operationName, RequestAttributes requestAttributes)
-        {
-            this.OperationName = operationName;
-            this.RequestAttributes = requestAttributes;
-            this.request = httpContext.Request;
-            this.response = new AspNetResponse(httpContext.Response);
-
-            this.RequestPreferences = new RequestPreferences(httpContext);
-        }
-
-        public HttpRequestBase HttpRequest
+        public HttpRequest Request
         {
             get { return request; }
         }
@@ -48,36 +34,26 @@ namespace ServiceStack.Host.AspNet
             get { return request; }
         }
 
-        public IResponse Response
+        public HttpRequestWrapper(HttpRequest request)
+            : this(null, request)
         {
-            get { return response; }
         }
 
-        public IHttpResponse HttpResponse
+        public HttpRequestWrapper(string operationName, HttpRequest request)
         {
-            get { return response; }
+            this.OperationName = operationName;
+            this.request = request;
+            this.Container = Container;
         }
-
-        public RequestAttributes RequestAttributes { get; set; }
-
-        public IRequestPreferences RequestPreferences { get; private set; }
 
         public T TryResolve<T>()
         {
-            if (typeof(T) == typeof(IHttpRequest))
-                throw new Exception("You don't need to use IHttpRequest.TryResolve<IHttpRequest> to resolve itself");
-
-            if (typeof(T) == typeof(IHttpResponse))
-                throw new Exception("Resolve IHttpResponse with 'Response' property instead of IHttpRequest.TryResolve<IHttpResponse>");
-
-            return Container != null
-                ? Container.TryResolve<T>()
-                : HostContext.TryResolve<T>();
+            return Container == null
+                ? EndpointHost.AppHost.TryResolve<T>()
+                : Container.TryResolve<T>();
         }
 
         public string OperationName { get; set; }
-
-        public object Dto { get; set; }
 
         public string ContentType
         {
@@ -93,11 +69,6 @@ namespace ServiceStack.Host.AspNet
                     ?? (httpMethod = Param(HttpHeaders.XHttpMethodOverride)
                     ?? request.HttpMethod);
             }
-        }
-
-        public string Verb
-        {
-            get { return HttpMethod; }
         }
 
         public string Param(string name)
@@ -144,11 +115,8 @@ namespace ServiceStack.Host.AspNet
             set
             {
                 this.responseContentType = value;
-                HasExplicitResponseContentType = true;
             }
         }
-
-        public bool HasExplicitResponseContentType { get; private set; }
 
         private Dictionary<string, Cookie> cookies;
         public IDictionary<string, Cookie> Cookies
@@ -161,9 +129,6 @@ namespace ServiceStack.Host.AspNet
                     for (var i = 0; i < this.request.Cookies.Count; i++)
                     {
                         var httpCookie = this.request.Cookies[i];
-                        if (httpCookie == null)
-                            continue;
-
                         Cookie cookie = null;
 
                         // try-catch needed as malformed cookie names (e.g. '$Version') can be returned
@@ -177,35 +142,35 @@ namespace ServiceStack.Host.AspNet
                                 Expires = httpCookie.Expires,
                             };
                         }
-                        catch(Exception ex)
+                        catch
                         {
-                            log.Warn("Error trying to create System.Net.Cookie: " + httpCookie.Name, ex);
+                            // I don't like this, application code now has access to less data than it would when
+                            // using the raw HttpRequest. Atleast logging that here would be nice?
+                            // Not sure, leaving it up to you Demis.
                         }
 
-                        if (cookie != null)
+                        if ( cookie != null )
                             cookies[httpCookie.Name] = cookie;
+
                     }
                 }
                 return cookies;
             }
         }
 
-        private NameValueCollectionWrapper headers;
-        public INameValueCollection Headers
+        public NameValueCollection Headers
         {
-            get { return headers ?? (headers = new NameValueCollectionWrapper(request.Headers)); }
+            get { return request.Headers; }
         }
 
-        private NameValueCollectionWrapper queryString;
-        public INameValueCollection QueryString
+        public NameValueCollection QueryString
         {
-            get { return queryString ?? (queryString = new NameValueCollectionWrapper(request.QueryString)); }
+            get { return request.QueryString; }
         }
 
-        private NameValueCollectionWrapper formData;
-        public INameValueCollection FormData
+        public NameValueCollection FormData
         {
-            get { return formData ?? (formData = new NameValueCollectionWrapper(request.Form)); }
+            get { return request.Form; }
         }
 
         public string GetRawBody()
@@ -232,12 +197,7 @@ namespace ServiceStack.Host.AspNet
             {
                 try
                 {
-                    return HostContext.Config.StripApplicationVirtualPath
-                        ? request.Url.GetLeftPart(UriPartial.Authority)
-                            .CombineWith(HostContext.Config.HandlerFactoryPath)
-                            .CombineWith(PathInfo)
-                            .TrimEnd('/')
-                        : request.Url.AbsoluteUri.TrimEnd('/');
+                    return request.Url.AbsoluteUri.TrimEnd('/');
                 }
                 catch (Exception)
                 {
@@ -260,22 +220,6 @@ namespace ServiceStack.Host.AspNet
             }
         }
 
-        public int? XForwardedPort
-        {
-            get
-            {
-                return string.IsNullOrEmpty(request.Headers[HttpHeaders.XForwardedPort]) ? (int?) null : int.Parse(request.Headers[HttpHeaders.XForwardedPort]);
-            }
-        }
-
-        public string XForwardedProtocol
-        {
-            get
-            {
-                return string.IsNullOrEmpty(request.Headers[HttpHeaders.XForwardedProtocol]) ? null : request.Headers[HttpHeaders.XForwardedProtocol];
-            }
-        }
-
         public string XRealIp
         {
             get
@@ -295,7 +239,7 @@ namespace ServiceStack.Host.AspNet
 
         public bool IsSecureConnection
         {
-            get { return request.IsSecureConnection || XForwardedProtocol == "https"; }
+            get { return request.IsSecureConnection; }
         }
 
         public string[] AcceptTypes
@@ -335,19 +279,19 @@ namespace ServiceStack.Host.AspNet
             get { return request.ContentLength; }
         }
 
-        private IHttpFile[] httpFiles;
-        public IHttpFile[] Files
+        private IFile[] files;
+        public IFile[] Files
         {
             get
             {
-                if (httpFiles == null)
+                if (files == null)
                 {
-                    httpFiles = new IHttpFile[request.Files.Count];
+                    files = new IFile[request.Files.Count];
                     for (var i = 0; i < request.Files.Count; i++)
                     {
                         var reqFile = request.Files[i];
 
-                        httpFiles[i] = new HttpFile
+                        files[i] = new HttpFile
                         {
                             ContentType = reqFile.ContentType,
                             ContentLength = reqFile.ContentLength,
@@ -356,8 +300,13 @@ namespace ServiceStack.Host.AspNet
                         };
                     }
                 }
-                return httpFiles;
+                return files;
             }
+        }
+
+        public string ApplicationFilePath
+        {
+            get { return physicalFilePath; }
         }
 
         public Uri UrlReferrer

@@ -1,10 +1,13 @@
 ﻿using System;
 using System.Net;
-using System.Runtime.Serialization;
+using ServiceStack.ServiceInterface.ServiceModel;
+using ServiceStack.Common.Web;
+using ServiceStack.ServiceHost;
 using NUnit.Framework;
 using Funq;
+using ServiceStack.Service;
+using ServiceStack.ServiceClient.Web;
 using ServiceStack.Text;
-using ServiceStack.Web;
 
 namespace ServiceStack.WebHost.Endpoints.Tests
 {
@@ -15,7 +18,7 @@ namespace ServiceStack.WebHost.Endpoints.Tests
         public ResponseStatus ResponseStatus { get; set; }
     }
 
-    public class UserService : Service
+    public class UserService : ServiceInterface.Service
     {
         public object Get(User request)
         {
@@ -48,7 +51,7 @@ namespace ServiceStack.WebHost.Endpoints.Tests
     {
         public ResponseStatus ResponseStatus { get; set; }
     }
-    public class ExceptionWithResponseStatusService : Service
+    public class ExceptionWithResponseStatusService : ServiceInterface.Service
     {
         public object Any(ExceptionWithResponseStatus request)
         {
@@ -58,7 +61,7 @@ namespace ServiceStack.WebHost.Endpoints.Tests
 
     public class ExceptionNoResponseStatus { }
     public class ExceptionNoResponseStatusResponse { }
-    public class ExceptionNoResponseStatusService : Service
+    public class ExceptionNoResponseStatusService : ServiceInterface.Service
     {
         public object Any(ExceptionNoResponseStatus request)
         {
@@ -67,7 +70,7 @@ namespace ServiceStack.WebHost.Endpoints.Tests
     }
 
     public class ExceptionNoResponseDto { }
-    public class ExceptionNoResponseDtoService : Service
+    public class ExceptionNoResponseDtoService : ServiceInterface.Service
     {
         public object Any(ExceptionNoResponseDto request)
         {
@@ -77,27 +80,13 @@ namespace ServiceStack.WebHost.Endpoints.Tests
 
     public class UncatchedException { }
     public class UncatchedExceptionResponse { }
-    public class UncatchedExceptionService : Service
+    public class UncatchedExceptionService : ServiceInterface.Service
     {
         public object Any(UncatchedException request)
         {
             //We don't wrap a try..catch block around the service (which happens with ServiceBase<> automatically)
             //so the global exception handling strategy is invoked
             throw new ArgumentException();
-        }
-    }
-
-    [Route("/binding-error/{Id}")]
-    public class ExceptionWithRequestBinding
-    {
-        public int Id { get; set; }
-    }
-
-    public class ExceptionWithRequestBindingService : Service
-    {
-        public object Any(ExceptionWithRequestBinding request)
-        {
-            return request;
         }
     }
 
@@ -118,34 +107,22 @@ namespace ServiceStack.WebHost.Endpoints.Tests
             {
                 JsConfig.EmitCamelCaseNames = true;
 
-                SetConfig(new HostConfig { DebugMode = false });
+                SetConfig(new EndpointHostConfig { DebugMode = false });
 
                 //Custom global uncaught exception handling strategy
-                this.UncaughtExceptionHandlers.Add((req, res, operationName, ex) =>
+                this.ExceptionHandler = (req, res, operationName, ex) =>
                 {
-                    res.Write(string.Format("UncaughtException {0}", ex.GetType().Name));
+                    res.Write(string.Format("Exception {0}", ex.GetType().Name));
                     res.EndRequest(skipHeaders: true);
-                });
+                };
 
-                this.ServiceExceptionHandlers.Add((httpReq, request, exception) =>
+                this.ServiceExceptionHandler = (httpReq, request, exception) =>
                 {
                     if (request is UncatchedException)
                         throw exception;
 
                     return null;
-                });
-            }
-
-            public override void OnExceptionTypeFilter(Exception ex, ResponseStatus responseStatus)
-            {
-                "In OnExceptionTypeFilter...".Print();
-                base.OnExceptionTypeFilter(ex, responseStatus);
-            }
-
-            public override void OnUncaughtException(IRequest httpReq, IResponse httpRes, string operationName, Exception ex)
-            {
-                "In OnUncaughtException...".Print();
-                base.OnUncaughtException(httpReq, httpRes, operationName, ex);
+                };
             }
         }
 
@@ -163,7 +140,7 @@ namespace ServiceStack.WebHost.Endpoints.Tests
         public void OnTestFixtureTearDown()
         {
             appHost.Dispose();
-            appHost.UncaughtExceptionHandlers = null;
+            EndpointHost.ExceptionHandler = null;
         }
 
         static IRestClient[] ServiceClients = 
@@ -298,18 +275,8 @@ namespace ServiceStack.WebHost.Endpoints.Tests
         public void Can_override_global_exception_handling()
         {
             var req = (HttpWebRequest)WebRequest.Create(PredefinedJsonUrl<UncatchedException>());
-            var res = req.GetResponse().ReadToEnd();
-            Assert.AreEqual("UncaughtException ArgumentException", res);
-        }
-
-        [Test]
-        public void Request_binding_error_raises_UncaughtException()
-        {
-            var response = PredefinedJsonUrl<ExceptionWithRequestBinding>()
-                .AddQueryParam("Id", "NaN")
-                .GetStringFromUrl();
-
-            Assert.That(response, Is.EqualTo("UncaughtException SerializationException"));
+            var res = req.GetResponse().DownloadText();
+            Assert.AreEqual("Exception ArgumentException", res);
         }
     }
 }

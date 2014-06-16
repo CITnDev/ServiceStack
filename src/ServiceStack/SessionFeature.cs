@@ -1,11 +1,15 @@
 using System;
 using System.Web;
-using ServiceStack.Auth;
-using ServiceStack.Caching;
+using ServiceStack.CacheAccess;
+using ServiceStack.Common.Utils;
+using ServiceStack.Common.Web;
+using ServiceStack.ServiceHost;
+using ServiceStack.ServiceInterface.Auth;
 using ServiceStack.Text;
-using ServiceStack.Web;
+using ServiceStack.WebHost.Endpoints;
+using ServiceStack.WebHost.Endpoints.Extensions;
 
-namespace ServiceStack
+namespace ServiceStack.ServiceInterface
 {
     public class SessionFeature : IPlugin
     {
@@ -15,12 +19,6 @@ namespace ServiceStack
         public const string SessionOptionsKey = "ss-opt";
         public const string XUserAuthId = HttpHeaders.XUserAuthId;
         public static TimeSpan DefaultSessionExpiry = TimeSpan.FromDays(7 * 2); //2 weeks
-        public TimeSpan SessionExpiry { get; set; }
-
-        public SessionFeature()
-        {
-            this.SessionExpiry = DefaultSessionExpiry;
-        }
 
         private static bool alreadyConfigured;
 
@@ -30,10 +28,10 @@ namespace ServiceStack
             alreadyConfigured = true;
 
             //Add permanent and session cookies if not already set.
-            appHost.GlobalRequestFilters.Add(AddSessionIdToRequestFilter);
+            appHost.RequestFilters.Add(AddSessionIdToRequestFilter);
         }
 
-        public static void AddSessionIdToRequestFilter(IRequest req, IResponse res, object requestDto)
+        public static void AddSessionIdToRequestFilter(IHttpRequest req, IHttpResponse res, object requestDto)
         {
             if (req.GetItemOrCookie(SessionId) == null)
             {
@@ -45,17 +43,17 @@ namespace ServiceStack
             }
         }
 
-        public static string GetSessionId(IRequest httpReq = null)
+        public static string GetSessionId(IHttpRequest httpReq = null)
         {
             if (httpReq == null && HttpContext.Current == null)
                 throw new NotImplementedException(OnlyAspNet);
 
-            httpReq = httpReq ?? HttpContext.Current.ToRequest();
+            httpReq = httpReq ?? HttpContext.Current.Request.ToRequest();
 
             return httpReq.GetSessionId();
         }
 
-        public static void CreateSessionIds(IRequest httpReq = null, IResponse httpRes = null)
+        public static void CreateSessionIds(IHttpRequest httpReq = null, IHttpResponse httpRes = null)
         {
             if (httpReq == null || httpRes == null)
             {
@@ -63,13 +61,13 @@ namespace ServiceStack
                     throw new NotImplementedException(OnlyAspNet);
             }
 
-            httpReq = httpReq ?? HttpContext.Current.ToRequest();
-            httpRes = httpRes ?? httpReq.Response;
+            httpReq = httpReq ?? HttpContext.Current.Request.ToRequest();
+            httpRes = httpRes ?? HttpContext.Current.Response.ToResponse();
 
             httpRes.CreateSessionIds(httpReq);
         }
 
-        public static string GetSessionKey(IRequest httpReq = null)
+        public static string GetSessionKey(IHttpRequest httpReq = null)
         {
             var sessionId = GetSessionId(httpReq);
             return sessionId == null ? null : GetSessionKey(sessionId);
@@ -80,7 +78,7 @@ namespace ServiceStack
             return IdUtils.CreateUrn<IAuthSession>(sessionId);
         }
 
-        public static T GetOrCreateSession<T>(ICacheClient cacheClient, IRequest httpReq = null, IResponse httpRes = null) 
+        public static T GetOrCreateSession<T>(ICacheClient cacheClient, IHttpRequest httpReq = null, IHttpResponse httpRes = null) 
             where T : class
         {
             T session = null;
@@ -89,7 +87,7 @@ namespace ServiceStack
             else
                 CreateSessionIds(httpReq, httpRes);
 
-            return session ?? typeof(T).New<T>();
+            return session ?? (T)typeof(T).CreateInstance();
         }
     }
 }

@@ -182,6 +182,13 @@
     <Compile Include="Caching\MultiCacheClient.cs" />
     <Compile Include="ClientCanSwapTemplatesAttribute.cs" />
     <Compile Include="Configuration\Config.cs" />
+    <Compile Include="CacheAccess.Providers\BasicPersistenceProviderCacheBase.cs" />
+    <Compile Include="CacheAccess.Providers\CacheClientExtensions.cs" />
+    <Compile Include="CacheAccess.Providers\FileAndCacheTextManager.cs" />
+    <Compile Include="CacheAccess.Providers\FileSystemXmlCacheClient.cs" />
+    <Compile Include="CacheAccess.Providers\MemoryCacheClient.cs" />
+    <Compile Include="CacheAccess.Providers\MultiCacheClient.cs" />
+    <Compile Include="CacheAccess.Providers\PersistenceProviderCache.cs" />
     <Compile Include="Configuration\AppSettings.cs" />
     <Compile Include="Configuration\AppSettingsBase.cs" />
     <Compile Include="Configuration\ConfigUtils.cs" />
